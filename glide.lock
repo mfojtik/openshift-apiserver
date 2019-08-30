@@ -1,5 +1,5 @@
-hash: 56d25296289a75a189c256170afa294407da08b3cb83ddc075114abf689e3802
-updated: 2019-08-30T16:06:37.684673+02:00
+hash: fe91453044af709589568a71fdfb4dae6202f10209d11c80d4b410cacccc7c6d
+updated: 2019-08-30T22:04:23.788143+02:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 2ae31c8b6b30d2f4c8100c20d527b571e9c433bb
@@ -134,6 +134,8 @@ imports:
   - log
 - name: github.com/evanphx/json-patch
   version: 5858425f75500d40c52783dce87d085a483ce135
+- name: github.com/exponent-io/jsonpath
+  version: d6023ce2651d8eafb5c75bb0c7167536102ec9f5
 - name: github.com/fsnotify/fsnotify
   version: c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9
 - name: github.com/fsouza/go-dockerclient
@@ -192,6 +194,8 @@ imports:
   - ptypes/any
   - ptypes/duration
   - ptypes/timestamp
+- name: github.com/google/btree
+  version: 4030bb1f1f0c35b30ca7009e9ebd06849dd45306
 - name: github.com/google/cadvisor
   version: 9fa3b14299662991d2a8bef36f233ec0739fc902
 - name: github.com/google/go-cmp
@@ -214,6 +218,10 @@ imports:
   - extensions
 - name: github.com/gorilla/mux
   version: 08e7f807d38d6a870193019bb439056118661505
+- name: github.com/gregjones/httpcache
+  version: 787624de3eb7bd915c329cba748687a3b22666a6
+  subpackages:
+  - diskcache
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
   version: c225b8c3b01faf2899099b768856a9e916e5087b
 - name: github.com/grpc-ecosystem/grpc-gateway
@@ -248,6 +256,8 @@ imports:
   version: 6c72808b55902eae4c5943626030429ff20f3b63
   subpackages:
   - pkg/guid
+- name: github.com/mitchellh/go-wordwrap
+  version: 9e67c67572bc5dd02aef930e2b0ae3c02a4b5a5c
 - name: github.com/mitchellh/mapstructure
   version: 3536a929edddb9a5b34bd6861dc4a9647cb459fe
 - name: github.com/modern-go/concurrent
@@ -268,7 +278,7 @@ imports:
   version: 53ca7dc85f609e8aa3af7902f189ed5dca96dbb5
   repo: https://github.com/openshift/onsi-ginkgo.git
 - name: github.com/opencontainers/go-digest
-  version: a6d0ee40d4207ea02364bd3b9e8e77b9159ba1eb
+  version: ac19fd6e7483ff933754af248d80be865e543d22
 - name: github.com/opencontainers/image-spec
   version: 372ad780f63454fbbbbcc7cf80e5b90245c13e13
   subpackages:
@@ -470,6 +480,8 @@ imports:
   - pkg/util/log
 - name: github.com/pborman/uuid
   version: 8b1b92947f46224e3b97bb1a3a5b0382be00d31e
+- name: github.com/peterbourgon/diskv
+  version: 5f041e8faa004a95c88a202771f4cc3e991971e6
 - name: github.com/pkg/errors
   version: 645ef00459ed84a119197bfb8d8205042c6df63d
 - name: github.com/pkg/profile
@@ -500,6 +512,8 @@ imports:
   version: 44968752391892e1b0d0b821ee79e9a85fa13049
 - name: github.com/PuerkitoBio/urlesc
   version: de5bf2ad457846296e2031421a34e2568e304e35
+- name: github.com/russross/blackfriday
+  version: 05f3235734ad95d0016f6a23902f06461fcf567a
 - name: github.com/sirupsen/logrus
   version: 89742aefa4b206dcf400792f3bd35b542998eb3b
 - name: github.com/spf13/cobra
@@ -568,6 +582,12 @@ imports:
 - name: golang.org/x/text
   version: e6919f6577db79269a6443b9dc46d18f2238fb5d
   subpackages:
+  - encoding
+  - encoding/internal
+  - encoding/internal/identifier
+  - encoding/unicode
+  - internal/utf8internal
+  - runes
   - secure/bidirule
   - transform
   - unicode/bidi
@@ -746,6 +766,7 @@ imports:
   - pkg/apis/meta/internalversion
   - pkg/apis/meta/v1
   - pkg/apis/meta/v1/unstructured
+  - pkg/apis/meta/v1/unstructured/unstructuredscheme
   - pkg/apis/meta/v1/validation
   - pkg/apis/meta/v1beta1
   - pkg/apis/meta/v1beta1/validation
@@ -910,11 +931,25 @@ imports:
   - plugin/pkg/authorizer/webhook
 - name: k8s.io/cli-runtime
   version: 442a64f3fed798534c06243d0283714123346cf2
+  subpackages:
+  - pkg/genericclioptions
+  - pkg/kustomize
+  - pkg/kustomize/k8sdeps
+  - pkg/kustomize/k8sdeps/configmapandsecret
+  - pkg/kustomize/k8sdeps/kunstruct
+  - pkg/kustomize/k8sdeps/kv
+  - pkg/kustomize/k8sdeps/transformer
+  - pkg/kustomize/k8sdeps/transformer/hash
+  - pkg/kustomize/k8sdeps/transformer/patch
+  - pkg/kustomize/k8sdeps/validator
+  - pkg/printers
+  - pkg/resource
 - name: k8s.io/client-go
   version: 0a74433fb22231a88db9119f88ac494411c3594e
   subpackages:
   - discovery
   - discovery/cached
+  - discovery/cached/disk
   - discovery/cached/memory
   - discovery/fake
   - dynamic
@@ -1192,10 +1227,23 @@ imports:
   - pkg/schemaconv
   - pkg/util
   - pkg/util/proto
+  - pkg/util/proto/validation
 - name: k8s.io/kube-proxy
   version: 7e0495d8a3ff35bf62cd06b16c95e6d49d5fa382
 - name: k8s.io/kube-scheduler
   version: 4470440ed041cb1580cb721154449e1e7b62b4de
+- name: k8s.io/kubectl
+  version: 14af4a63a1e15721ee74baf7480861e20878262a
+  subpackages:
+  - pkg/cmd/util
+  - pkg/scheme
+  - pkg/util/interrupt
+  - pkg/util/openapi
+  - pkg/util/openapi/validation
+  - pkg/util/templates
+  - pkg/util/term
+  - pkg/validation
+  - pkg/version
 - name: k8s.io/kubelet
   version: fa8f3d935631e05513b4d1bd5db58d3b361a7a59
 - name: k8s.io/kubernetes
@@ -1416,11 +1464,37 @@ imports:
   version: 581e00157fb1a0435d4fac54a52d1ca1e481d60e
   subpackages:
   - buffer
+  - exec
   - integer
   - net
   - path
   - pointer
   - trace
+- name: sigs.k8s.io/kustomize
+  version: a6f65144121d1955266b0cd836ce954c04122dc8
+  subpackages:
+  - pkg/commands/build
+  - pkg/constants
+  - pkg/expansion
+  - pkg/factory
+  - pkg/fs
+  - pkg/git
+  - pkg/gvk
+  - pkg/ifc
+  - pkg/ifc/transformer
+  - pkg/image
+  - pkg/internal/error
+  - pkg/loader
+  - pkg/patch
+  - pkg/patch/transformer
+  - pkg/resid
+  - pkg/resmap
+  - pkg/resource
+  - pkg/target
+  - pkg/transformers
+  - pkg/transformers/config
+  - pkg/transformers/config/defaultconfig
+  - pkg/types
 - name: sigs.k8s.io/structured-merge-diff
   version: 0c1d754dd6485aa156ff3c8c599079adac6ec82f
   subpackages:
