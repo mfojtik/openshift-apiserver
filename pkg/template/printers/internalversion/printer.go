@@ -2,75 +2,110 @@ package internalversion
 
 import (
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	kprinters "k8s.io/kubernetes/pkg/printers"
 
 	templatev1 "github.com/openshift/api/template/v1"
-
 	templateapi "github.com/openshift/openshift-apiserver/pkg/template/apis/template"
 )
 
-func AddTemplateOpenShiftHandler(h kprinters.PrintHandler) {
-	addTemplateInstance(h)
-	addBrokerTemplateInstance(h)
-}
+const templateDescriptionLen = 80
 
-func addBrokerTemplateInstance(h kprinters.PrintHandler) {
-	brokerTemplateInstanceColumnsDefinitions := []metav1.TableColumnDefinition{
+func AddHandlers(h kprinters.PrintHandler) {
+	templateColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
-		{Name: "Template Instance", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Description", Type: "string", Description: "Template description."},
+		{Name: "Parameters", Type: "string", Description: templatev1.Template{}.SwaggerDoc()["parameters"]},
+		{Name: "Objects", Type: "string", Description: "Number of resources in this template."},
 	}
-	if err := h.TableHandler(brokerTemplateInstanceColumnsDefinitions, printBrokerTemplateInstance); err != nil {
+	if err := h.TableHandler(templateColumnDefinitions, printTemplateList); err != nil {
 		panic(err)
 	}
-	if err := h.TableHandler(brokerTemplateInstanceColumnsDefinitions, printBrokerTemplateInstanceList); err != nil {
+	if err := h.TableHandler(templateColumnDefinitions, printTemplate); err != nil {
+		panic(err)
+	}
+
+	templateInstanceColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Template", Type: "string", Description: "Template name to be instantiated."},
+	}
+	if err := h.TableHandler(templateInstanceColumnDefinitions, printTemplateInstanceList); err != nil {
+		panic(err)
+	}
+	if err := h.TableHandler(templateInstanceColumnDefinitions, printTemplateInstance); err != nil {
+		panic(err)
+	}
+
+	brokerTemplateInstanceColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Template Instance", Type: "string", Description: "Template instance name."},
+	}
+	if err := h.TableHandler(brokerTemplateInstanceColumnDefinitions, printBrokerTemplateInstanceList); err != nil {
+		panic(err)
+	}
+	if err := h.TableHandler(brokerTemplateInstanceColumnDefinitions, printBrokerTemplateInstance); err != nil {
 		panic(err)
 	}
 }
 
-func printBrokerTemplateInstance(brokerTemplateInstance *templateapi.BrokerTemplateInstance, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
+func printTemplate(t *templateapi.Template, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
 	row := metav1.TableRow{
-		Object: runtime.RawExtension{Object: brokerTemplateInstance},
+		Object: runtime.RawExtension{Object: t},
 	}
 
-	brokerTemplateInstanceName := brokerTemplateInstance.Name
-	if options.WithNamespace {
-		brokerTemplateInstanceName = fmt.Sprintf("%s/%s", brokerTemplateInstance.Namespace, brokerTemplateInstance.Name)
+	description := ""
+	if t.Annotations != nil {
+		description = t.Annotations["description"]
+	}
+	// Only print the first line of description
+	if lines := strings.SplitN(description, "\n", 2); len(lines) > 1 {
+		description = lines[0] + "..."
+	}
+	if len(description) > templateDescriptionLen {
+		description = strings.TrimSpace(description[:templateDescriptionLen-3]) + "..."
+	}
+	empty, generated, total := 0, 0, len(t.Parameters)
+	for _, p := range t.Parameters {
+		if len(p.Value) > 0 {
+			continue
+		}
+		if len(p.Generate) > 0 {
+			generated++
+			continue
+		}
+		empty++
+	}
+	params := ""
+	switch {
+	case empty > 0:
+		params = fmt.Sprintf("%d (%d blank)", total, empty)
+	case generated > 0:
+		params = fmt.Sprintf("%d (%d generated)", total, generated)
+	default:
+		params = fmt.Sprintf("%d (all set)", total)
 	}
 
-	row.Cells = append(row.Cells,
-		brokerTemplateInstanceName,
-		fmt.Sprintf("%s/%s", brokerTemplateInstance.Spec.TemplateInstance.Namespace, brokerTemplateInstance.Spec.TemplateInstance.Name),
-	)
+	name := formatResourceName(options.Kind, t.Name, options.WithKind)
+
+	row.Cells = append(row.Cells, name, description, params, len(t.Objects))
 
 	return []metav1.TableRow{row}, nil
 }
 
-func printBrokerTemplateInstanceList(brokerTemplateInstanceList *templateapi.BrokerTemplateInstanceList, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
-	rows := make([]metav1.TableRow, 0, len(brokerTemplateInstanceList.Items))
-	for i := range brokerTemplateInstanceList.Items {
-		r, err := printBrokerTemplateInstance(&brokerTemplateInstanceList.Items[i], options)
+func printTemplateList(list *templateapi.TemplateList, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printTemplate(&list.Items[i], options)
 		if err != nil {
 			return nil, err
 		}
 		rows = append(rows, r...)
 	}
 	return rows, nil
-}
-
-func addTemplateInstance(h kprinters.PrintHandler) {
-	templateInstanceColumnsDefinitions := []metav1.TableColumnDefinition{
-		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
-		{Name: "Template", Type: "string", Format: "name", Description: templatev1.Template{}.SwaggerDoc()["name"]},
-	}
-	if err := h.TableHandler(templateInstanceColumnsDefinitions, printTemplateInstance); err != nil {
-		panic(err)
-	}
-	if err := h.TableHandler(templateInstanceColumnsDefinitions, printTemplateInstanceList); err != nil {
-		panic(err)
-	}
 }
 
 func printTemplateInstance(templateInstance *templateapi.TemplateInstance, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
@@ -78,27 +113,55 @@ func printTemplateInstance(templateInstance *templateapi.TemplateInstance, optio
 		Object: runtime.RawExtension{Object: templateInstance},
 	}
 
-	templateInstanceName := templateInstance.Name
-	if options.WithNamespace {
-		templateInstanceName = fmt.Sprintf("%s/%s", templateInstance.Namespace, templateInstance.Name)
-	}
+	name := formatResourceName(options.Kind, templateInstance.Name, options.WithKind)
 
-	row.Cells = append(row.Cells,
-		templateInstanceName,
-		templateInstance.Spec.Template.Name,
-	)
+	row.Cells = append(row.Cells, name, templateInstance.Spec.Template.Name)
 
 	return []metav1.TableRow{row}, nil
 }
 
-func printTemplateInstanceList(templateInstanceList *templateapi.TemplateInstanceList, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
-	rows := make([]metav1.TableRow, 0, len(templateInstanceList.Items))
-	for i := range templateInstanceList.Items {
-		r, err := printTemplateInstance(&templateInstanceList.Items[i], options)
+func printTemplateInstanceList(list *templateapi.TemplateInstanceList, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printTemplateInstance(&list.Items[i], options)
 		if err != nil {
 			return nil, err
 		}
 		rows = append(rows, r...)
 	}
 	return rows, nil
+}
+
+func printBrokerTemplateInstance(brokerTemplateInstance *templateapi.BrokerTemplateInstance, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: brokerTemplateInstance},
+	}
+
+	name := formatResourceName(options.Kind, brokerTemplateInstance.Name, options.WithKind)
+
+	row.Cells = append(row.Cells, name, brokerTemplateInstance.Spec.TemplateInstance.Namespace, brokerTemplateInstance.Spec.TemplateInstance.Name)
+
+	return []metav1.TableRow{row}, nil
+}
+
+func printBrokerTemplateInstanceList(list *templateapi.BrokerTemplateInstanceList, options kprinters.PrintOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printBrokerTemplateInstance(&list.Items[i], options)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
+}
+
+// formatResourceName receives a resource kind, name, and boolean specifying
+// whether or not to update the current name to "kind/name"
+func formatResourceName(kind schema.GroupKind, name string, withKind bool) string {
+	if !withKind || kind.Empty() {
+		return name
+	}
+
+	return strings.ToLower(kind.String()) + "/" + name
 }
