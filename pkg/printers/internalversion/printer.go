@@ -1,6 +1,7 @@
 package internalversion
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	kapi "k8s.io/kubernetes/pkg/apis/core"
@@ -31,45 +33,45 @@ import (
 )
 
 var (
-	buildColumns                = []string{"NAME", "TYPE", "FROM", "STATUS", "STARTED", "DURATION"}
-	buildConfigColumns          = []string{"NAME", "TYPE", "FROM", "LATEST"}
-	imageColumns                = []string{"NAME", "IMAGE REF"}
-	imageStreamTagColumns       = []string{"NAME", "IMAGE REF", "UPDATED"}
-	imageStreamTagWideColumns   = []string{"NAME", "IMAGE REF", "UPDATED", "IMAGENAME"}
-	imageStreamImageColumns     = []string{"NAME", "UPDATED"}
-	imageStreamImageWideColumns = []string{"NAME", "IMAGE REF", "UPDATED", "IMAGENAME"}
-	imageStreamColumns          = []string{"NAME", "IMAGE REPOSITORY", "TAGS", "UPDATED"}
-	projectColumns              = []string{"NAME", "DISPLAY NAME", "STATUS"}
-	routeColumns                = []string{"NAME", "HOST/PORT", "PATH", "SERVICES", "PORT", "TERMINATION", "WILDCARD"}
-	deploymentConfigColumns     = []string{"NAME", "REVISION", "DESIRED", "CURRENT", "TRIGGERED BY"}
-	templateColumns             = []string{"NAME", "DESCRIPTION", "PARAMETERS", "OBJECTS"}
-	roleBindingColumns          = []string{"NAME", "ROLE", "USERS", "GROUPS", "SERVICE ACCOUNTS", "SUBJECTS"}
-	roleColumns                 = []string{"NAME"}
+	buildColumns                = []string{"Name", "Type", "From", "Status", "Started", "Duration"}
+	buildConfigColumns          = []string{"Name", "Type", "From", "Latest"}
+	imageColumns                = []string{"Name", "Image Reference"}
+	imageStreamTagColumns       = []string{"Name", "Image Reference", "Updated"}
+	imageStreamTagWideColumns   = []string{"Name", "Image Reference", "Updated", "Image Name"}
+	imageStreamImageColumns     = []string{"Name", "Updated"}
+	imageStreamImageWideColumns = []string{"Name", "Image Reference", "Updated", "Image Name"}
+	imageStreamColumns          = []string{"Name", "Image Repository", "Tags", "Updated"}
+	projectColumns              = []string{"Name", "Display Name", "Status"}
+	routeColumns                = []string{"Name", "Host/Port", "Path", "Services", "Port", "Termination", "Wildcard"}
+	deploymentConfigColumns     = []string{"Name", "Revision", "Desired", "Current", "Triggered By"}
+	templateColumns             = []string{"Name", "Description", "Parameters", "Objects"}
+	roleBindingColumns          = []string{"Name", "Role", "Users", "Groups", "Service Accounts", "Subjects"}
+	roleColumns                 = []string{"Name"}
 
-	oauthClientColumns              = []string{"NAME", "SECRET", "WWW-CHALLENGE", "TOKEN-MAX-AGE", "REDIRECT URIS"}
-	oauthClientAuthorizationColumns = []string{"NAME", "USER NAME", "CLIENT NAME", "SCOPES"}
-	oauthAccessTokenColumns         = []string{"NAME", "USER NAME", "CLIENT NAME", "CREATED", "EXPIRES", "REDIRECT URI", "SCOPES"}
-	oauthAuthorizeTokenColumns      = []string{"NAME", "USER NAME", "CLIENT NAME", "CREATED", "EXPIRES", "REDIRECT URI", "SCOPES"}
+	oauthClientColumns              = []string{"Name", "Secret", "WWW-Challenge", "Token-Max-Age", "Redirect URIs"}
+	oauthClientAuthorizationColumns = []string{"Name", "User Name", "Client Name", "Scopes"}
+	oauthAccessTokenColumns         = []string{"Name", "User Name", "Client Name", "Created", "Expires", "Redirect URI", "Scopes"}
+	oauthAuthorizeTokenColumns      = []string{"Name", "User Name", "Client Name", "Created", "Expires", "Redirect URI", "Scopes"}
 
-	userColumns                = []string{"NAME", "UID", "FULL NAME", "IDENTITIES"}
-	identityColumns            = []string{"NAME", "IDP NAME", "IDP USER NAME", "USER NAME", "USER UID"}
-	userIdentityMappingColumns = []string{"NAME", "IDENTITY", "USER NAME", "USER UID"}
-	groupColumns               = []string{"NAME", "USERS"}
+	userColumns                = []string{"Name", "UID", "Full Name", "Identities"}
+	identityColumns            = []string{"Name", "IDP Name", "IDP User Name", "User Name", "User UID"}
+	userIdentityMappingColumns = []string{"Name", "Identity", "User Name", "User UID"}
+	groupColumns               = []string{"Name", "Users"}
 
 	// IsPersonalSubjectAccessReviewColumns contains known custom role extensions
-	IsPersonalSubjectAccessReviewColumns = []string{"NAME"}
+	IsPersonalSubjectAccessReviewColumns = []string{"Name"}
 
-	clusterResourceQuotaColumns = []string{"NAME", "LABEL SELECTOR", "ANNOTATION SELECTOR"}
+	clusterResourceQuotaColumns = []string{"Name", "Label Selector", "Annotation Selector"}
 
-	roleBindingRestrictionColumns = []string{"NAME", "SUBJECT TYPE", "SUBJECTS"}
+	roleBindingRestrictionColumns = []string{"Name", "Subject Type", "Subjects"}
 
-	templateInstanceColumns       = []string{"NAME", "TEMPLATE"}
-	brokerTemplateInstanceColumns = []string{"NAME", "TEMPLATEINSTANCE"}
+	templateInstanceColumns       = []string{"Name", "Template"}
+	brokerTemplateInstanceColumns = []string{"Name", "Template Instance"}
 
-	policyRuleColumns = []string{"VERBS", "NON-RESOURCE URLS", "RESOURCE NAMES", "API GROUPS", "RESOURCES"}
+	policyRuleColumns = []string{"Verbs", "Non-Resource URLs", "Resource Names", "API Groups", "Resources"}
 
-	securityContextConstraintsColumns = []string{"NAME", "PRIV", "CAPS", "SELINUX", "RUNASUSER", "FSGROUP", "SUPGROUP", "PRIORITY", "READONLYROOTFS", "VOLUMES"}
-	rangeAllocationColumns            = []string{"NAME", "RANGE", "DATA"}
+	securityContextConstraintsColumns = []string{"Name", "Priv", "Caps", "SELinux", "RunAsUser", "FSGroup", "SupGroup", "Priority", "ReadyOnlyFS", "Volumes"}
+	rangeAllocationColumns            = []string{"Name", "Range", "Data"}
 )
 
 func init() {
@@ -80,76 +82,112 @@ func init() {
 	}
 }
 
+type originTableHandler struct {
+	err            error
+	printerHandler kprinters.PrintHandler
+}
+
+func newOriginTableHandler(p kprinters.PrintHandler) *originTableHandler {
+	return &originTableHandler{printerHandler: p}
+}
+
+func (h *originTableHandler) add(columns []string, printFn interface{}, wideColumns ...string) {
+	if h.err != nil {
+		return
+	}
+	columnDefinition := []metav1.TableColumnDefinition{}
+	for _, c := range columns {
+		d := metav1.TableColumnDefinition{Name: c, Type: "string"}
+		if c == "Name" {
+			d.Description = metav1.ObjectMeta{}.SwaggerDoc()["name"]
+		}
+		columnDefinition = append(columnDefinition, d)
+	}
+	for _, c := range wideColumns {
+		d := metav1.TableColumnDefinition{Name: c, Type: "string", Priority: 1}
+		columnDefinition = append(columnDefinition, d)
+	}
+	if err := h.printerHandler.TableHandler(columnDefinition, printFn); err != nil {
+		h.err = err
+	}
+}
+
 // AddHandlers adds print handlers for internal openshift API objects
 func AddHandlers(p kprinters.PrintHandler) {
-	p.Handler(buildColumns, nil, printBuild)
-	p.Handler(buildColumns, nil, printBuildList)
-	p.Handler(buildConfigColumns, nil, printBuildConfig)
-	p.Handler(buildConfigColumns, nil, printBuildConfigList)
-	p.Handler(policyRuleColumns, nil, printSubjectRulesReview)
-	p.Handler(policyRuleColumns, nil, printSelfSubjectRulesReview)
-	p.Handler(imageColumns, nil, printImage)
-	p.Handler(imageStreamTagColumns, imageStreamTagWideColumns, printImageStreamTag)
-	p.Handler(imageStreamTagColumns, imageStreamTagWideColumns, printImageStreamTagList)
-	p.Handler(imageStreamImageColumns, imageStreamImageWideColumns, printImageStreamImage)
-	p.Handler(imageColumns, nil, printImageList)
-	p.Handler(imageStreamColumns, nil, printImageStream)
-	p.Handler(imageStreamColumns, nil, printImageStreamList)
-	p.Handler(projectColumns, nil, printProject)
-	p.Handler(projectColumns, nil, printProjectList)
-	p.Handler(routeColumns, nil, printRoute)
-	p.Handler(routeColumns, nil, printRouteList)
-	p.Handler(deploymentConfigColumns, nil, printDeploymentConfig)
-	p.Handler(deploymentConfigColumns, nil, printDeploymentConfigList)
-	p.Handler(templateColumns, nil, printTemplate)
-	p.Handler(templateColumns, nil, printTemplateList)
+	h := newOriginTableHandler(p)
+	defer func() {
+		if h.err != nil {
+			panic(h.err)
+		}
+	}()
 
-	p.Handler(roleBindingColumns, nil, printRoleBinding)
-	p.Handler(roleBindingColumns, nil, printRoleBindingList)
-	p.Handler(roleColumns, nil, printRole)
-	p.Handler(roleColumns, nil, printRoleList)
+	h.add(buildColumns, printBuild)
+	h.add(buildConfigColumns, printBuildConfig)
+	h.add(buildConfigColumns, printBuildConfigList)
+	h.add(policyRuleColumns, printSubjectRulesReview)
+	h.add(policyRuleColumns, printSelfSubjectRulesReview)
+	h.add(imageColumns, printImage)
+	h.add(imageStreamTagColumns, printImageStreamTag, imageStreamImageWideColumns...)
+	h.add(imageStreamTagColumns, printImageStreamTagList, imageStreamTagWideColumns...)
+	h.add(imageStreamImageColumns, printImageStreamImage, imageStreamImageWideColumns...)
+	h.add(imageColumns, printImageList)
+	h.add(imageStreamColumns, printImageStream)
+	h.add(imageStreamColumns, printImageStreamList)
+	h.add(projectColumns, printProject)
+	h.add(projectColumns, printProjectList)
+	h.add(routeColumns, printRoute)
+	h.add(routeColumns, printRouteList)
+	h.add(deploymentConfigColumns, printDeploymentConfig)
+	h.add(deploymentConfigColumns, printDeploymentConfigList)
+	h.add(templateColumns, printTemplate)
+	h.add(templateColumns, printTemplateList)
 
-	p.Handler(roleColumns, nil, printClusterRole)
-	p.Handler(roleColumns, nil, printClusterRoleList)
-	p.Handler(roleBindingColumns, nil, printClusterRoleBinding)
-	p.Handler(roleBindingColumns, nil, printClusterRoleBindingList)
+	h.add(roleBindingColumns, printRoleBinding)
+	h.add(roleBindingColumns, printRoleBindingList)
+	h.add(roleColumns, printRole)
+	h.add(roleColumns, printRoleList)
 
-	p.Handler(oauthClientColumns, nil, printOAuthClient)
-	p.Handler(oauthClientColumns, nil, printOAuthClientList)
-	p.Handler(oauthClientAuthorizationColumns, nil, printOAuthClientAuthorization)
-	p.Handler(oauthClientAuthorizationColumns, nil, printOAuthClientAuthorizationList)
-	p.Handler(oauthAccessTokenColumns, nil, printOAuthAccessToken)
-	p.Handler(oauthAccessTokenColumns, nil, printOAuthAccessTokenList)
-	p.Handler(oauthAuthorizeTokenColumns, nil, printOAuthAuthorizeToken)
-	p.Handler(oauthAuthorizeTokenColumns, nil, printOAuthAuthorizeTokenList)
+	h.add(roleColumns, printClusterRole)
+	h.add(roleColumns, printClusterRoleList)
+	h.add(roleBindingColumns, printClusterRoleBinding)
+	h.add(roleBindingColumns, printClusterRoleBindingList)
 
-	p.Handler(userColumns, nil, printUser)
-	p.Handler(userColumns, nil, printUserList)
-	p.Handler(identityColumns, nil, printIdentity)
-	p.Handler(identityColumns, nil, printIdentityList)
-	p.Handler(userIdentityMappingColumns, nil, printUserIdentityMapping)
-	p.Handler(groupColumns, nil, printGroup)
-	p.Handler(groupColumns, nil, printGroupList)
+	h.add(oauthClientColumns, printOAuthClient)
+	h.add(oauthClientColumns, printOAuthClientList)
+	h.add(oauthClientAuthorizationColumns, printOAuthClientAuthorization)
+	h.add(oauthClientAuthorizationColumns, printOAuthClientAuthorizationList)
+	h.add(oauthAccessTokenColumns, printOAuthAccessToken)
+	h.add(oauthAccessTokenColumns, printOAuthAccessTokenList)
+	h.add(oauthAuthorizeTokenColumns, printOAuthAuthorizeToken)
+	h.add(oauthAuthorizeTokenColumns, printOAuthAuthorizeTokenList)
 
-	p.Handler(IsPersonalSubjectAccessReviewColumns, nil, printIsPersonalSubjectAccessReview)
+	h.add(userColumns, printUser)
+	h.add(userColumns, printUserList)
+	h.add(identityColumns, printIdentity)
+	h.add(identityColumns, printIdentityList)
+	h.add(userIdentityMappingColumns, printUserIdentityMapping)
+	h.add(groupColumns, printGroup)
+	h.add(groupColumns, printGroupList)
 
-	p.Handler(clusterResourceQuotaColumns, nil, printClusterResourceQuota)
-	p.Handler(clusterResourceQuotaColumns, nil, printClusterResourceQuotaList)
-	p.Handler(clusterResourceQuotaColumns, nil, printAppliedClusterResourceQuota)
-	p.Handler(clusterResourceQuotaColumns, nil, printAppliedClusterResourceQuotaList)
+	h.add(IsPersonalSubjectAccessReviewColumns, printIsPersonalSubjectAccessReview)
 
-	p.Handler(roleBindingRestrictionColumns, nil, printRoleBindingRestriction)
-	p.Handler(roleBindingRestrictionColumns, nil, printRoleBindingRestrictionList)
+	h.add(clusterResourceQuotaColumns, printClusterResourceQuota)
+	h.add(clusterResourceQuotaColumns, printClusterResourceQuotaList)
+	h.add(clusterResourceQuotaColumns, printAppliedClusterResourceQuota)
+	h.add(clusterResourceQuotaColumns, printAppliedClusterResourceQuotaList)
 
-	p.Handler(templateInstanceColumns, nil, printTemplateInstance)
-	p.Handler(templateInstanceColumns, nil, printTemplateInstanceList)
-	p.Handler(brokerTemplateInstanceColumns, nil, printBrokerTemplateInstance)
-	p.Handler(brokerTemplateInstanceColumns, nil, printBrokerTemplateInstanceList)
+	h.add(roleBindingRestrictionColumns, printRoleBindingRestriction)
+	h.add(roleBindingRestrictionColumns, printRoleBindingRestrictionList)
 
-	p.Handler(securityContextConstraintsColumns, nil, printSecurityContextConstraints)
-	p.Handler(securityContextConstraintsColumns, nil, printSecurityContextConstraintsList)
-	p.Handler(rangeAllocationColumns, nil, printRangeAllocation)
-	p.Handler(rangeAllocationColumns, nil, printRangeAllocationList)
+	h.add(templateInstanceColumns, printTemplateInstance)
+	h.add(templateInstanceColumns, printTemplateInstanceList)
+	h.add(brokerTemplateInstanceColumns, printBrokerTemplateInstance)
+	h.add(brokerTemplateInstanceColumns, printBrokerTemplateInstanceList)
+
+	h.add(securityContextConstraintsColumns, printSecurityContextConstraints)
+	h.add(securityContextConstraintsColumns, printSecurityContextConstraintsList)
+	h.add(rangeAllocationColumns, printRangeAllocation)
+	h.add(rangeAllocationColumns, printRangeAllocationList)
 }
 
 const templateDescriptionLen = 80
@@ -985,11 +1023,38 @@ func printGroupList(list *userapi.GroupList, w io.Writer, opts kprinters.PrintOp
 	return nil
 }
 
+func appendLabels(itemLabels map[string]string, columnLabels []string) string {
+	var buffer bytes.Buffer
+
+	for _, cl := range columnLabels {
+		buffer.WriteString(fmt.Sprint("\t"))
+		if il, ok := itemLabels[cl]; ok {
+			buffer.WriteString(fmt.Sprint(il))
+		} else {
+			buffer.WriteString("<none>")
+		}
+	}
+
+	return buffer.String()
+}
+
+func appendAllLabels(showLabels bool, itemLabels map[string]string) string {
+	var buffer bytes.Buffer
+
+	if showLabels {
+		buffer.WriteString(fmt.Sprint("\t"))
+		buffer.WriteString(labels.FormatLabels(itemLabels))
+	}
+	buffer.WriteString("\n")
+
+	return buffer.String()
+}
+
 func appendItemLabels(itemLabels map[string]string, w io.Writer, columnLabels []string, showLabels bool) error {
-	if _, err := fmt.Fprint(w, kprinters.AppendLabels(itemLabels, columnLabels)); err != nil {
+	if _, err := fmt.Fprint(w, appendLabels(itemLabels, columnLabels)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprint(w, kprinters.AppendAllLabels(showLabels, itemLabels)); err != nil {
+	if _, err := fmt.Fprint(w, appendAllLabels(showLabels, itemLabels)); err != nil {
 		return err
 	}
 	return nil
@@ -1007,10 +1072,10 @@ func printClusterResourceQuota(resourceQuota *quotaapi.ClusterResourceQuota, w i
 	if _, err := fmt.Fprintf(w, "\t%s", resourceQuota.Spec.Selector.AnnotationSelector); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprint(w, kprinters.AppendLabels(resourceQuota.Labels, options.ColumnLabels)); err != nil {
+	if _, err := fmt.Fprint(w, appendLabels(resourceQuota.Labels, options.ColumnLabels)); err != nil {
 		return err
 	}
-	_, err := fmt.Fprint(w, kprinters.AppendAllLabels(options.ShowLabels, resourceQuota.Labels))
+	_, err := fmt.Fprint(w, appendAllLabels(options.ShowLabels, resourceQuota.Labels))
 	return err
 }
 
