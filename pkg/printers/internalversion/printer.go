@@ -25,11 +25,11 @@ import (
 	imageapi "github.com/openshift/openshift-apiserver/pkg/image/apis/image"
 	oauthapi "github.com/openshift/openshift-apiserver/pkg/oauth/apis/oauth"
 	projectapi "github.com/openshift/openshift-apiserver/pkg/project/apis/project"
-	quotaapi "github.com/openshift/openshift-apiserver/pkg/quota/apis/quota"
 	routeapi "github.com/openshift/openshift-apiserver/pkg/route/apis/route"
 	templateapi "github.com/openshift/openshift-apiserver/pkg/template/apis/template"
 	userapi "github.com/openshift/openshift-apiserver/pkg/user/apis/user"
 
+	quotainternalprinters "github.com/openshift/openshift-apiserver/pkg/quota/printers/internalversion"
 	securityinternalprinters "github.com/openshift/openshift-apiserver/pkg/security/printers/internalversion"
 	templateinternalprinters "github.com/openshift/openshift-apiserver/pkg/template/printers/internalversion"
 )
@@ -63,8 +63,6 @@ var (
 	// IsPersonalSubjectAccessReviewColumns contains known custom role extensions
 	IsPersonalSubjectAccessReviewColumns = []string{"Name"}
 
-	clusterResourceQuotaColumns = []string{"Name", "Label Selector", "Annotation Selector"}
-
 	roleBindingRestrictionColumns = []string{"Name", "Subject Type", "Subjects"}
 
 	policyRuleColumns = []string{"Verbs", "Non-Resource URLs", "Resource Names", "API Groups", "Resources"}
@@ -81,6 +79,9 @@ func init() {
 
 		// template.openshift.io handlers
 		templateinternalprinters.AddTemplateOpenShiftHandler(p)
+
+		// quota.openshift.io handlers
+		quotainternalprinters.AddQuotaOpenShiftHandler(p)
 
 		// Legacy handlers
 		AddHandlers(p)
@@ -175,11 +176,6 @@ func AddHandlers(p kprinters.PrintHandler) {
 	h.add(groupColumns, printGroupList)
 
 	h.add(IsPersonalSubjectAccessReviewColumns, printIsPersonalSubjectAccessReview)
-
-	h.add(clusterResourceQuotaColumns, printClusterResourceQuota)
-	h.add(clusterResourceQuotaColumns, printClusterResourceQuotaList)
-	h.add(clusterResourceQuotaColumns, printAppliedClusterResourceQuota)
-	h.add(clusterResourceQuotaColumns, printAppliedClusterResourceQuotaList)
 
 	h.add(roleBindingRestrictionColumns, printRoleBindingRestriction)
 	h.add(roleBindingRestrictionColumns, printRoleBindingRestrictionList)
@@ -1051,47 +1047,6 @@ func appendItemLabels(itemLabels map[string]string, w io.Writer, columnLabels []
 	}
 	if _, err := fmt.Fprint(w, appendAllLabels(showLabels, itemLabels)); err != nil {
 		return err
-	}
-	return nil
-}
-
-func printClusterResourceQuota(resourceQuota *quotaapi.ClusterResourceQuota, w io.Writer, options kprinters.PrintOptions) error {
-	name := formatResourceName(options.Kind, resourceQuota.Name, options.WithKind)
-
-	if _, err := fmt.Fprintf(w, "%s", name); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "\t%s", metav1.FormatLabelSelector(resourceQuota.Spec.Selector.LabelSelector)); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "\t%s", resourceQuota.Spec.Selector.AnnotationSelector); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprint(w, appendLabels(resourceQuota.Labels, options.ColumnLabels)); err != nil {
-		return err
-	}
-	_, err := fmt.Fprint(w, appendAllLabels(options.ShowLabels, resourceQuota.Labels))
-	return err
-}
-
-func printClusterResourceQuotaList(list *quotaapi.ClusterResourceQuotaList, w io.Writer, options kprinters.PrintOptions) error {
-	for i := range list.Items {
-		if err := printClusterResourceQuota(&list.Items[i], w, options); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func printAppliedClusterResourceQuota(resourceQuota *quotaapi.AppliedClusterResourceQuota, w io.Writer, options kprinters.PrintOptions) error {
-	return printClusterResourceQuota(quotaapi.ConvertAppliedClusterResourceQuotaToClusterResourceQuota(resourceQuota), w, options)
-}
-
-func printAppliedClusterResourceQuotaList(list *quotaapi.AppliedClusterResourceQuotaList, w io.Writer, options kprinters.PrintOptions) error {
-	for i := range list.Items {
-		if err := printClusterResourceQuota(quotaapi.ConvertAppliedClusterResourceQuotaToClusterResourceQuota(&list.Items[i]), w, options); err != nil {
-			return err
-		}
 	}
 	return nil
 }
