@@ -31,6 +31,7 @@ import (
 	userapi "github.com/openshift/openshift-apiserver/pkg/user/apis/user"
 
 	securityinternalprinters "github.com/openshift/openshift-apiserver/pkg/security/printers/internalversion"
+	templateinternalprinters "github.com/openshift/openshift-apiserver/pkg/template/printers/internalversion"
 )
 
 var (
@@ -66,19 +67,20 @@ var (
 
 	roleBindingRestrictionColumns = []string{"Name", "Subject Type", "Subjects"}
 
-	templateInstanceColumns       = []string{"Name", "Template"}
-	brokerTemplateInstanceColumns = []string{"Name", "Template Instance"}
-
 	policyRuleColumns = []string{"Verbs", "Non-Resource URLs", "Resource Names", "API Groups", "Resources"}
 )
 
 func init() {
 	// TODO this should be eliminated
 	kprintersinternal.AddHandlers = func(p kprinters.PrintHandler) {
+		// kubernetes handlers
 		kprintersinternal.AddKubeHandlers(p)
 
 		// security.openshift.io handlers
 		securityinternalprinters.AddSecurityOpenShiftHandler(p)
+
+		// template.openshift.io handlers
+		templateinternalprinters.AddTemplateOpenShiftHandler(p)
 
 		// Legacy handlers
 		AddHandlers(p)
@@ -181,11 +183,6 @@ func AddHandlers(p kprinters.PrintHandler) {
 
 	h.add(roleBindingRestrictionColumns, printRoleBindingRestriction)
 	h.add(roleBindingRestrictionColumns, printRoleBindingRestrictionList)
-
-	h.add(templateInstanceColumns, printTemplateInstance)
-	h.add(templateInstanceColumns, printTemplateInstanceList)
-	h.add(brokerTemplateInstanceColumns, printBrokerTemplateInstance)
-	h.add(brokerTemplateInstanceColumns, printBrokerTemplateInstanceList)
 }
 
 const templateDescriptionLen = 80
@@ -1160,53 +1157,6 @@ func printRoleBindingRestriction(rbr *authorizationapi.RoleBindingRestriction, w
 func printRoleBindingRestrictionList(list *authorizationapi.RoleBindingRestrictionList, w io.Writer, options kprinters.PrintOptions) error {
 	for i := range list.Items {
 		if err := printRoleBindingRestriction(&list.Items[i], w, options); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func printTemplateInstance(templateInstance *templateapi.TemplateInstance, w io.Writer, opts kprinters.PrintOptions) error {
-	name := formatResourceName(opts.Kind, templateInstance.Name, opts.WithKind)
-
-	if opts.WithNamespace {
-		if _, err := fmt.Fprintf(w, "%s\t", templateInstance.Namespace); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(w, "%s\t%s", name, templateInstance.Spec.Template.Name); err != nil {
-		return err
-	}
-	if err := appendItemLabels(templateInstance.Labels, w, opts.ColumnLabels, opts.ShowLabels); err != nil {
-		return err
-	}
-	return nil
-}
-
-func printTemplateInstanceList(list *templateapi.TemplateInstanceList, w io.Writer, opts kprinters.PrintOptions) error {
-	for i := range list.Items {
-		if err := printTemplateInstance(&list.Items[i], w, opts); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func printBrokerTemplateInstance(brokerTemplateInstance *templateapi.BrokerTemplateInstance, w io.Writer, opts kprinters.PrintOptions) error {
-	name := formatResourceName(opts.Kind, brokerTemplateInstance.Name, opts.WithKind)
-
-	if _, err := fmt.Fprintf(w, "%s\t%s/%s", name, brokerTemplateInstance.Spec.TemplateInstance.Namespace, brokerTemplateInstance.Spec.TemplateInstance.Name); err != nil {
-		return err
-	}
-	if err := appendItemLabels(brokerTemplateInstance.Labels, w, opts.ColumnLabels, opts.ShowLabels); err != nil {
-		return err
-	}
-	return nil
-}
-
-func printBrokerTemplateInstanceList(list *templateapi.BrokerTemplateInstanceList, w io.Writer, opts kprinters.PrintOptions) error {
-	for i := range list.Items {
-		if err := printBrokerTemplateInstance(&list.Items[i], w, opts); err != nil {
 			return err
 		}
 	}
