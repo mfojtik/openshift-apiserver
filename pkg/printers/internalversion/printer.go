@@ -27,9 +27,10 @@ import (
 	projectapi "github.com/openshift/openshift-apiserver/pkg/project/apis/project"
 	quotaapi "github.com/openshift/openshift-apiserver/pkg/quota/apis/quota"
 	routeapi "github.com/openshift/openshift-apiserver/pkg/route/apis/route"
-	securityapi "github.com/openshift/openshift-apiserver/pkg/security/apis/security"
 	templateapi "github.com/openshift/openshift-apiserver/pkg/template/apis/template"
 	userapi "github.com/openshift/openshift-apiserver/pkg/user/apis/user"
+
+	securityinternalprinters "github.com/openshift/openshift-apiserver/pkg/security/printers/internalversion"
 )
 
 var (
@@ -69,15 +70,17 @@ var (
 	brokerTemplateInstanceColumns = []string{"Name", "Template Instance"}
 
 	policyRuleColumns = []string{"Verbs", "Non-Resource URLs", "Resource Names", "API Groups", "Resources"}
-
-	securityContextConstraintsColumns = []string{"Name", "Priv", "Caps", "SELinux", "RunAsUser", "FSGroup", "SupGroup", "Priority", "ReadyOnlyFS", "Volumes"}
-	rangeAllocationColumns            = []string{"Name", "Range", "Data"}
 )
 
 func init() {
 	// TODO this should be eliminated
 	kprintersinternal.AddHandlers = func(p kprinters.PrintHandler) {
 		kprintersinternal.AddKubeHandlers(p)
+
+		// security.openshift.io handlers
+		securityinternalprinters.AddSecurityOpenShiftHandler(p)
+
+		// Legacy handlers
 		AddHandlers(p)
 	}
 }
@@ -183,11 +186,6 @@ func AddHandlers(p kprinters.PrintHandler) {
 	h.add(templateInstanceColumns, printTemplateInstanceList)
 	h.add(brokerTemplateInstanceColumns, printBrokerTemplateInstance)
 	h.add(brokerTemplateInstanceColumns, printBrokerTemplateInstanceList)
-
-	h.add(securityContextConstraintsColumns, printSecurityContextConstraints)
-	h.add(securityContextConstraintsColumns, printSecurityContextConstraintsList)
-	h.add(rangeAllocationColumns, printRangeAllocation)
-	h.add(rangeAllocationColumns, printRangeAllocationList)
 }
 
 const templateDescriptionLen = 80
@@ -1212,42 +1210,5 @@ func printBrokerTemplateInstanceList(list *templateapi.BrokerTemplateInstanceLis
 			return err
 		}
 	}
-	return nil
-}
-
-func printSecurityContextConstraints(item *securityapi.SecurityContextConstraints, w io.Writer, options kprinters.PrintOptions) error {
-	priority := "<none>"
-	if item.Priority != nil {
-		priority = fmt.Sprintf("%d", *item.Priority)
-	}
-
-	_, err := fmt.Fprintf(w, "%s\t%t\t%v\t%s\t%s\t%s\t%s\t%s\t%t\t%v\n", item.Name, item.AllowPrivilegedContainer,
-		item.AllowedCapabilities, item.SELinuxContext.Type,
-		item.RunAsUser.Type, item.FSGroup.Type, item.SupplementalGroups.Type, priority, item.ReadOnlyRootFilesystem, item.Volumes)
-	return err
-}
-
-func printSecurityContextConstraintsList(list *securityapi.SecurityContextConstraintsList, w io.Writer, options kprinters.PrintOptions) error {
-	for _, item := range list.Items {
-		if err := printSecurityContextConstraints(&item, w, options); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func printRangeAllocation(item *securityapi.RangeAllocation, w io.Writer, options kprinters.PrintOptions) error {
-	_, err := fmt.Fprintf(w, "%s\t%s\t0x%x\n", item.Name, item.Range, item.Data)
-	return err
-}
-
-func printRangeAllocationList(list *securityapi.RangeAllocationList, w io.Writer, options kprinters.PrintOptions) error {
-	for _, item := range list.Items {
-		if err := printRangeAllocation(&item, w, options); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
