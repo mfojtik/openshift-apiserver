@@ -19,7 +19,6 @@ import (
 
 	oapi "github.com/openshift/openshift-apiserver/pkg/api"
 	appsapi "github.com/openshift/openshift-apiserver/pkg/apps/apis/apps"
-	authorizationapi "github.com/openshift/openshift-apiserver/pkg/authorization/apis/authorization"
 	buildapi "github.com/openshift/openshift-apiserver/pkg/build/apis/build"
 	buildinternalhelpers "github.com/openshift/openshift-apiserver/pkg/build/apis/build/internal_helpers"
 	imageapi "github.com/openshift/openshift-apiserver/pkg/image/apis/image"
@@ -29,6 +28,7 @@ import (
 	templateapi "github.com/openshift/openshift-apiserver/pkg/template/apis/template"
 	userapi "github.com/openshift/openshift-apiserver/pkg/user/apis/user"
 
+	authinternalprinters "github.com/openshift/openshift-apiserver/pkg/authorization/printers/internalversion"
 	quotainternalprinters "github.com/openshift/openshift-apiserver/pkg/quota/printers/internalversion"
 	securityinternalprinters "github.com/openshift/openshift-apiserver/pkg/security/printers/internalversion"
 	templateinternalprinters "github.com/openshift/openshift-apiserver/pkg/template/printers/internalversion"
@@ -47,8 +47,6 @@ var (
 	routeColumns                = []string{"Name", "Host/Port", "Path", "Services", "Port", "Termination", "Wildcard"}
 	deploymentConfigColumns     = []string{"Name", "Revision", "Desired", "Current", "Triggered By"}
 	templateColumns             = []string{"Name", "Description", "Parameters", "Objects"}
-	roleBindingColumns          = []string{"Name", "Role", "Users", "Groups", "Service Accounts", "Subjects"}
-	roleColumns                 = []string{"Name"}
 
 	oauthClientColumns              = []string{"Name", "Secret", "WWW-Challenge", "Token-Max-Age", "Redirect URIs"}
 	oauthClientAuthorizationColumns = []string{"Name", "User Name", "Client Name", "Scopes"}
@@ -59,13 +57,6 @@ var (
 	identityColumns            = []string{"Name", "IDP Name", "IDP User Name", "User Name", "User UID"}
 	userIdentityMappingColumns = []string{"Name", "Identity", "User Name", "User UID"}
 	groupColumns               = []string{"Name", "Users"}
-
-	// IsPersonalSubjectAccessReviewColumns contains known custom role extensions
-	IsPersonalSubjectAccessReviewColumns = []string{"Name"}
-
-	roleBindingRestrictionColumns = []string{"Name", "Subject Type", "Subjects"}
-
-	policyRuleColumns = []string{"Verbs", "Non-Resource URLs", "Resource Names", "API Groups", "Resources"}
 )
 
 func init() {
@@ -79,6 +70,9 @@ func init() {
 
 		// template.openshift.io handlers
 		templateinternalprinters.AddTemplateOpenShiftHandler(p)
+
+		// authorization.openshift.io handlers
+		authinternalprinters.AddAuthorizationOpenShiftHandler(p)
 
 		// quota.openshift.io handlers
 		quotainternalprinters.AddQuotaOpenShiftHandler(p)
@@ -130,8 +124,6 @@ func AddHandlers(p kprinters.PrintHandler) {
 	h.add(buildColumns, printBuild)
 	h.add(buildConfigColumns, printBuildConfig)
 	h.add(buildConfigColumns, printBuildConfigList)
-	h.add(policyRuleColumns, printSubjectRulesReview)
-	h.add(policyRuleColumns, printSelfSubjectRulesReview)
 	h.add(imageColumns, printImage)
 	h.add(imageStreamTagColumns, printImageStreamTag, imageStreamImageWideColumns...)
 	h.add(imageStreamTagColumns, printImageStreamTagList, imageStreamTagWideColumns...)
@@ -147,16 +139,6 @@ func AddHandlers(p kprinters.PrintHandler) {
 	h.add(deploymentConfigColumns, printDeploymentConfigList)
 	h.add(templateColumns, printTemplate)
 	h.add(templateColumns, printTemplateList)
-
-	h.add(roleBindingColumns, printRoleBinding)
-	h.add(roleBindingColumns, printRoleBindingList)
-	h.add(roleColumns, printRole)
-	h.add(roleColumns, printRoleList)
-
-	h.add(roleColumns, printClusterRole)
-	h.add(roleColumns, printClusterRoleList)
-	h.add(roleBindingColumns, printClusterRoleBinding)
-	h.add(roleBindingColumns, printClusterRoleBindingList)
 
 	h.add(oauthClientColumns, printOAuthClient)
 	h.add(oauthClientColumns, printOAuthClientList)
@@ -174,11 +156,6 @@ func AddHandlers(p kprinters.PrintHandler) {
 	h.add(userIdentityMappingColumns, printUserIdentityMapping)
 	h.add(groupColumns, printGroup)
 	h.add(groupColumns, printGroupList)
-
-	h.add(IsPersonalSubjectAccessReviewColumns, printIsPersonalSubjectAccessReview)
-
-	h.add(roleBindingRestrictionColumns, printRoleBindingRestriction)
-	h.add(roleBindingRestrictionColumns, printRoleBindingRestrictionList)
 }
 
 const templateDescriptionLen = 80
@@ -381,29 +358,6 @@ func printBuildConfig(bc *buildapi.BuildConfig, w io.Writer, opts kprinters.Prin
 	}
 	if err := appendItemLabels(bc.Labels, w, opts.ColumnLabels, opts.ShowLabels); err != nil {
 		return err
-	}
-	return nil
-}
-
-func printSubjectRulesReview(rulesReview *authorizationapi.SubjectRulesReview, w io.Writer, opts kprinters.PrintOptions) error {
-	printPolicyRule(rulesReview.Status.Rules, w)
-	return nil
-}
-
-func printSelfSubjectRulesReview(selfSubjectRulesReview *authorizationapi.SelfSubjectRulesReview, w io.Writer, opts kprinters.PrintOptions) error {
-	printPolicyRule(selfSubjectRulesReview.Status.Rules, w)
-	return nil
-}
-
-func printPolicyRule(policyRules []authorizationapi.PolicyRule, w io.Writer) error {
-	for _, rule := range policyRules {
-		fmt.Fprintf(w, "%v\t%v\t%v\t%v\t%v\n",
-			rule.Verbs.List(),
-			rule.NonResourceURLs.List(),
-			rule.ResourceNames.List(),
-			rule.APIGroups,
-			rule.Resources.List(),
-		)
 	}
 	return nil
 }
@@ -786,90 +740,6 @@ func printDeploymentConfigList(list *appsapi.DeploymentConfigList, w io.Writer, 
 	return nil
 }
 
-func printClusterRole(role *authorizationapi.ClusterRole, w io.Writer, opts kprinters.PrintOptions) error {
-	return printRole(authorizationapi.ToRole(role), w, opts)
-}
-
-func printClusterRoleList(list *authorizationapi.ClusterRoleList, w io.Writer, opts kprinters.PrintOptions) error {
-	return printRoleList(authorizationapi.ToRoleList(list), w, opts)
-}
-
-func printClusterRoleBinding(roleBinding *authorizationapi.ClusterRoleBinding, w io.Writer, opts kprinters.PrintOptions) error {
-	return printRoleBinding(authorizationapi.ToRoleBinding(roleBinding), w, opts)
-}
-
-func printClusterRoleBindingList(list *authorizationapi.ClusterRoleBindingList, w io.Writer, opts kprinters.PrintOptions) error {
-	return printRoleBindingList(authorizationapi.ToRoleBindingList(list), w, opts)
-}
-
-func printIsPersonalSubjectAccessReview(a *authorizationapi.IsPersonalSubjectAccessReview, w io.Writer, opts kprinters.PrintOptions) error {
-	_, err := fmt.Fprintf(w, "IsPersonalSubjectAccessReview\n")
-	return err
-}
-
-func printRole(role *authorizationapi.Role, w io.Writer, opts kprinters.PrintOptions) error {
-	name := formatResourceName(opts.Kind, role.Name, opts.WithKind)
-	if opts.WithNamespace {
-		if _, err := fmt.Fprintf(w, "%s\t", role.Namespace); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(w, "%s", name); err != nil {
-		return err
-	}
-	if err := appendItemLabels(role.Labels, w, opts.ColumnLabels, opts.ShowLabels); err != nil {
-		return err
-	}
-	return nil
-}
-
-func printRoleList(list *authorizationapi.RoleList, w io.Writer, opts kprinters.PrintOptions) error {
-	for _, role := range list.Items {
-		if err := printRole(&role, w, opts); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func truncatedList(list []string, maxLength int) string {
-	if len(list) > maxLength {
-		return fmt.Sprintf("%s (%d more)", strings.Join(list[0:maxLength], ", "), len(list)-maxLength)
-	}
-	return strings.Join(list, ", ")
-}
-
-func printRoleBinding(roleBinding *authorizationapi.RoleBinding, w io.Writer, opts kprinters.PrintOptions) error {
-	name := formatResourceName(opts.Kind, roleBinding.Name, opts.WithKind)
-	if opts.WithNamespace {
-		if _, err := fmt.Fprintf(w, "%s\t", roleBinding.Namespace); err != nil {
-			return err
-		}
-	}
-	users, groups, sas, others := authorizationapi.SubjectsStrings(roleBinding.Namespace, roleBinding.Subjects)
-
-	if _, err := fmt.Fprintf(w, "%s\t%s\t%v\t%v\t%v\t%v", name,
-		roleBinding.RoleRef.Namespace+"/"+roleBinding.RoleRef.Name, truncatedList(users, 5),
-		truncatedList(groups, 5), strings.Join(sas, ", "), strings.Join(others, ", ")); err != nil {
-		return err
-	}
-	if err := appendItemLabels(roleBinding.Labels, w, opts.ColumnLabels, opts.ShowLabels); err != nil {
-		return err
-	}
-	return nil
-}
-
-func printRoleBindingList(list *authorizationapi.RoleBindingList, w io.Writer, opts kprinters.PrintOptions) error {
-	for _, roleBinding := range list.Items {
-		if err := printRoleBinding(&roleBinding, w, opts); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func printOAuthClient(client *oauthapi.OAuthClient, w io.Writer, opts kprinters.PrintOptions) error {
 	name := formatResourceName(opts.Kind, client.Name, opts.WithKind)
 	challenge := "FALSE"
@@ -1047,73 +917,6 @@ func appendItemLabels(itemLabels map[string]string, w io.Writer, columnLabels []
 	}
 	if _, err := fmt.Fprint(w, appendAllLabels(showLabels, itemLabels)); err != nil {
 		return err
-	}
-	return nil
-}
-
-func printRoleBindingRestriction(rbr *authorizationapi.RoleBindingRestriction, w io.Writer, options kprinters.PrintOptions) error {
-	name := formatResourceName(options.Kind, rbr.Name, options.WithKind)
-	subjectType := roleBindingRestrictionType(rbr)
-	subjectList := []string{}
-	const numOfSubjectsShown = 3
-	switch {
-	case rbr.Spec.UserRestriction != nil:
-		for _, user := range rbr.Spec.UserRestriction.Users {
-			subjectList = append(subjectList, user)
-		}
-		for _, group := range rbr.Spec.UserRestriction.Groups {
-			subjectList = append(subjectList, fmt.Sprintf("group(%s)", group))
-		}
-		for _, selector := range rbr.Spec.UserRestriction.Selectors {
-			subjectList = append(subjectList,
-				metav1.FormatLabelSelector(&selector))
-		}
-	case rbr.Spec.GroupRestriction != nil:
-		for _, group := range rbr.Spec.GroupRestriction.Groups {
-			subjectList = append(subjectList, group)
-		}
-		for _, selector := range rbr.Spec.GroupRestriction.Selectors {
-			subjectList = append(subjectList,
-				metav1.FormatLabelSelector(&selector))
-		}
-	case rbr.Spec.ServiceAccountRestriction != nil:
-		for _, sa := range rbr.Spec.ServiceAccountRestriction.ServiceAccounts {
-			subjectList = append(subjectList, fmt.Sprintf("%s/%s",
-				sa.Namespace, sa.Name))
-		}
-		for _, ns := range rbr.Spec.ServiceAccountRestriction.Namespaces {
-			subjectList = append(subjectList, fmt.Sprintf("%s/*", ns))
-		}
-	}
-
-	if options.WithNamespace {
-		if _, err := fmt.Fprintf(w, "%s\t", rbr.Namespace); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(w, "%s", name); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "\t%s", subjectType); err != nil {
-		return err
-	}
-	subjects := "<none>"
-	if len(subjectList) > numOfSubjectsShown {
-		subjects = fmt.Sprintf("%s + %d more...",
-			strings.Join(subjectList[:numOfSubjectsShown], ", "),
-			len(subjectList)-numOfSubjectsShown)
-	} else if len(subjectList) > 0 {
-		subjects = strings.Join(subjectList, ", ")
-	}
-	_, err := fmt.Fprintf(w, "\t%s\n", subjects)
-	return err
-}
-
-func printRoleBindingRestrictionList(list *authorizationapi.RoleBindingRestrictionList, w io.Writer, options kprinters.PrintOptions) error {
-	for i := range list.Items {
-		if err := printRoleBindingRestriction(&list.Items[i], w, options); err != nil {
-			return err
-		}
 	}
 	return nil
 }
