@@ -417,7 +417,7 @@ func addAPIServerOrDie(delegateAPIServer genericapiserver.DelegationTarget, apiS
 	return delegateAPIServer
 }
 
-func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget) (*OpenshiftAPIServer, error) {
+func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget, skipOpenShiftPostStartHooks bool) (*OpenshiftAPIServer, error) {
 	delegateAPIServer := delegationTarget
 
 	delegateAPIServer = addAPIServerOrDie(delegateAPIServer, c.withAppsAPIServer)
@@ -441,12 +441,20 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		GenericAPIServer: genericServer,
 	}
 
+	if !skipOpenShiftPostStartHooks {
+		s.addOpenshiftPostStartHooks(c)
+	}
+
 	// this remains a non-healthz endpoint so that you can be healthy without being ready.
 	addReadinessCheckRoute(s.GenericAPIServer.Handler.NonGoRestfulMux, "/healthz/ready", c.ExtraConfig.ProjectAuthorizationCache.ReadyForAccess)
 
 	// this remains here and separate so that you can check both kube and openshift levels
 	AddOpenshiftVersionRoute(s.GenericAPIServer.Handler.GoRestfulContainer, "/version/openshift")
 
+	return s, nil
+}
+
+func (s OpenshiftAPIServer) addOpenshiftPostStartHooks(c completedConfig) {
 	// register our poststarthooks
 	s.GenericAPIServer.AddPostStartHookOrDie("authorization.openshift.io-bootstrapclusterroles",
 		func(context genericapiserver.PostStartHookContext) error {
@@ -478,8 +486,6 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		go c.ExtraConfig.ClusterQuotaMappingController.Run(5, context.StopCh)
 		return nil
 	})
-
-	return s, nil
 }
 
 // initReadinessCheckRoute initializes an HTTP endpoint for readiness checking

@@ -15,7 +15,8 @@ import (
 	_ "k8s.io/kubernetes/pkg/util/workqueue/prometheus" // for workqueue metric registration
 )
 
-func RunOpenShiftAPIServer(serverConfig *openshiftcontrolplanev1.OpenShiftAPIServerConfig, stopCh <-chan struct{}) error {
+func RunOpenShiftAPIServer(serverConfig *openshiftcontrolplanev1.OpenShiftAPIServerConfig, testOverrides *openshiftapiserver.OpenshiftAPIConfigTestOverrides, srvCh chan<- *openshiftapiserver.OpenshiftAPIServer,
+	stopCh <-chan struct{}) error {
 	serviceability.InitLogrusFromKlog()
 	// Allow privileged containers
 	capabilities.Initialize(capabilities.Capabilities{
@@ -27,13 +28,13 @@ func RunOpenShiftAPIServer(serverConfig *openshiftcontrolplanev1.OpenShiftAPISer
 		},
 	})
 
-	openshiftAPIServerRuntimeConfig, err := openshiftapiserver.NewOpenshiftAPIConfig(serverConfig)
+	openshiftAPIServerRuntimeConfig, err := openshiftapiserver.NewOpenshiftAPIConfig(serverConfig, testOverrides)
 	if err != nil {
 		return err
 	}
 
 	completedOpenshiftAPIServer := openshiftAPIServerRuntimeConfig.Complete()
-	openshiftAPIServer, err := completedOpenshiftAPIServer.New(genericapiserver.NewEmptyDelegate())
+	openshiftAPIServer, err := completedOpenshiftAPIServer.New(genericapiserver.NewEmptyDelegate(), testOverrides.SkipOpenshiftPostStartHooks)
 	if err != nil {
 		return err
 	}
@@ -46,5 +47,8 @@ func RunOpenShiftAPIServer(serverConfig *openshiftcontrolplanev1.OpenShiftAPISer
 
 	klog.Infof("Starting master on %s (%s)", serverConfig.ServingInfo.BindAddress, version.Get().String())
 
+	if srvCh != nil {
+		srvCh <- openshiftAPIServer
+	}
 	return preparedOpenshiftAPIServer.Run(stopCh)
 }

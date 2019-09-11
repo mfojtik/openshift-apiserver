@@ -10,11 +10,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apiserver/pkg/admission"
-	admissionmetrics "k8s.io/apiserver/pkg/admission/metrics"
-	genericapiserver "k8s.io/apiserver/pkg/server"
-	genericapiserveroptions "k8s.io/apiserver/pkg/server/options"
-	"k8s.io/apiserver/pkg/util/webhook"
 	cacheddiscovery "k8s.io/client-go/discovery/cached"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -23,19 +18,37 @@ import (
 	aggregatorapiserver "k8s.io/kube-aggregator/pkg/apiserver"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
+	"k8s.io/apiserver/pkg/admission"
+	admissionmetrics "k8s.io/apiserver/pkg/admission/metrics"
+	genericapiserver "k8s.io/apiserver/pkg/server"
+	genericapiserveroptions "k8s.io/apiserver/pkg/server/options"
+	"k8s.io/apiserver/pkg/util/webhook"
+
+	configv1 "github.com/openshift/api/config/v1"
 	openshiftcontrolplanev1 "github.com/openshift/api/openshiftcontrolplane/v1"
 	"github.com/openshift/apiserver-library-go/pkg/configflags"
 	"github.com/openshift/library-go/pkg/apiserver/admission/admissiontimeout"
 	"github.com/openshift/library-go/pkg/apiserver/apiserverconfig"
 	"github.com/openshift/library-go/pkg/config/helpers"
 	"github.com/openshift/library-go/pkg/config/serving"
+
 	"github.com/openshift/openshift-apiserver/pkg/cmd/openshift-apiserver/openshiftadmission"
 	"github.com/openshift/openshift-apiserver/pkg/cmd/openshift-apiserver/openshiftapiserver/configprocessing"
 	"github.com/openshift/openshift-apiserver/pkg/image/apiserver/registryhostname"
 	"github.com/openshift/openshift-apiserver/pkg/version"
 )
 
-func NewOpenshiftAPIConfig(config *openshiftcontrolplanev1.OpenShiftAPIServerConfig) (*OpenshiftAPIConfig, error) {
+// OpenshiftAPIConfigTestOverrides should be **only** used for integration testing.
+type OpenshiftAPIConfigTestOverrides struct {
+	PatchSecureServing            func(servingOptions *genericapiserveroptions.SecureServingOptionsWithLoopback) error
+	PatchEtcd                     func(options *genericapiserveroptions.EtcdOptions) error
+	PatchDelegatingAuthentication func(options *genericapiserveroptions.DelegatingAuthenticationOptions) error
+	PatchServingInfo              func(info *configv1.HTTPServingInfo) error
+
+	SkipOpenshiftPostStartHooks bool
+}
+
+func NewOpenshiftAPIConfig(config *openshiftcontrolplanev1.OpenShiftAPIServerConfig, patch *OpenshiftAPIConfigTestOverrides) (*OpenshiftAPIConfig, error) {
 	kubeClientConfig, err := helpers.GetKubeClientConfig(config.KubeClientConfig)
 	if err != nil {
 		return nil, err
@@ -48,7 +61,7 @@ func NewOpenshiftAPIConfig(config *openshiftcontrolplanev1.OpenShiftAPIServerCon
 
 	openshiftVersion := version.Get()
 
-	restOptsGetter, err := NewRESTOptionsGetter(config.APIServerArguments, config.StorageConfig)
+	restOptsGetter, err := NewRESTOptionsGetter(config.APIServerArguments, config.StorageConfig, patch.PatchEtcd)
 	if err != nil {
 		return nil, err
 	}
@@ -108,12 +121,22 @@ func NewOpenshiftAPIConfig(config *openshiftcontrolplanev1.OpenShiftAPIServerCon
 	// I'm just hoping this works.  I don't think we use it.
 	//MergedResourceConfig *serverstore.ResourceConfig
 
+	if err := patch.PatchServingInfo(&config.ServingInfo); err != nil {
+		return nil, err
+	}
+
 	servingOptions, err := serving.ToServingOptions(config.ServingInfo)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := servingOptions.ApplyTo(&genericConfig.Config.SecureServing, &genericConfig.Config.LoopbackClientConfig); err != nil {
 		return nil, err
+	}
+	if patch.PatchSecureServing != nil {
+		if err := patch.PatchSecureServing(servingOptions); err != nil {
+			return nil, err
+		}
 	}
 	authenticationOptions := genericapiserveroptions.NewDelegatingAuthenticationOptions()
 	// keep working for integration tests
@@ -126,9 +149,16 @@ func NewOpenshiftAPIConfig(config *openshiftcontrolplanev1.OpenShiftAPIServerCon
 		authenticationOptions.RequestHeader.ExtraHeaderPrefixes = config.AggregatorConfig.ExtraHeaderPrefixes
 	}
 	authenticationOptions.RemoteKubeConfigFile = config.KubeClientConfig.KubeConfig
+
+	if patch.PatchDelegatingAuthentication != nil {
+		if err := patch.PatchDelegatingAuthentication(authenticationOptions); err != nil {
+			return nil, err
+		}
+	}
 	if err := authenticationOptions.ApplyTo(&genericConfig.Authentication, genericConfig.SecureServing, genericConfig.OpenAPIConfig); err != nil {
 		return nil, err
 	}
+
 	authorizationOptions := genericapiserveroptions.NewDelegatingAuthorizationOptions().WithAlwaysAllowPaths("/healthz", "/healthz/").WithAlwaysAllowGroups("system:masters")
 	authorizationOptions.RemoteKubeConfigFile = config.KubeClientConfig.KubeConfig
 	if err := authorizationOptions.ApplyTo(&genericConfig.Authorization); err != nil {
