@@ -95,10 +95,40 @@ func (s *REST) Get(ctx context.Context, name string, options *metav1.GetOptions)
 	return role, nil
 }
 
-func (s *REST) Delete(ctx context.Context, name string, objectFunc rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
+func (s *REST) Delete(ctx context.Context, name string, validateObjectFunc rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
 	client, err := s.getImpersonatingClient(ctx)
 	if err != nil {
 		return nil, false, err
+	}
+
+	if options == nil {
+		options = metav1.NewDeleteOptions(0)
+	}
+
+	var preconditions metav1.Preconditions
+	if options.Preconditions != nil {
+		preconditions.UID = options.Preconditions.UID
+		preconditions.ResourceVersion = options.Preconditions.ResourceVersion
+	}
+
+	// Make sure we get the right resource version
+	cur, err := client.Get(name, metav1.GetOptions{ResourceVersion: *preconditions.ResourceVersion})
+	if err != nil {
+		return nil, false, err
+	}
+
+	// The the provided UID does not match, return conflict
+	if cur.UID != *preconditions.UID {
+		return &metav1.Status{Status: metav1.StatusFailure, Reason: metav1.StatusReasonConflict, Message: "UID does not match"}, true, nil
+	}
+
+	if err := validateObjectFunc(ctx, cur); err != nil {
+		return nil, false, err
+	}
+
+	// Compare precondition resource version and the actual object resource version before delete
+	if preconditions.ResourceVersion != nil && *preconditions.ResourceVersion != cur.ResourceVersion {
+		return &metav1.Status{Status: metav1.StatusFailure, Reason: metav1.StatusReasonConflict, Message: "ResourceVersion does not match"}, true, nil
 	}
 
 	if err := client.Delete(name, options); err != nil {

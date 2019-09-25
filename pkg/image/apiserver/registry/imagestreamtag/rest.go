@@ -325,7 +325,7 @@ func (r *REST) Update(ctx context.Context, tagName string, objInfo rest.UpdatedO
 // Delete removes a tag from a stream. `id` is of the format <stream name>:<tag>.
 // The associated image that the tag points to is *not* deleted.
 // The tag history is removed.
-func (r *REST) Delete(ctx context.Context, id string, objectFunc rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
+func (r *REST) Delete(ctx context.Context, id string, validateObjectFunc rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
 	name, tag, err := nameAndTag(id)
 	if err != nil {
 		return nil, false, err
@@ -334,6 +334,9 @@ func (r *REST) Delete(ctx context.Context, id string, objectFunc rest.ValidateOb
 	for i := 10; i > 0; i-- {
 		stream, err := r.imageStreamRegistry.GetImageStream(ctx, name, &metav1.GetOptions{})
 		if err != nil {
+			return nil, false, err
+		}
+		if err := validateObjectFunc(ctx, stream); err != nil {
 			return nil, false, err
 		}
 		if options != nil {

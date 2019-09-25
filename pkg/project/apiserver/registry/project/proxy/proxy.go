@@ -178,9 +178,11 @@ func (s *REST) Update(ctx context.Context, name string, objInfo rest.UpdatedObje
 	}
 
 	s.updateStrategy.PrepareForUpdate(ctx, obj, oldObj)
+
 	if errs := s.updateStrategy.ValidateUpdate(ctx, obj, oldObj); len(errs) > 0 {
 		return nil, false, kerrors.NewInvalid(project.Kind("Project"), projectObj.Name, errs)
 	}
+
 	if err := updateValidation(ctx, obj.DeepCopyObject(), oldObj.DeepCopyObject()); err != nil {
 		return nil, false, err
 	}
@@ -201,6 +203,40 @@ func (s *REST) Update(ctx context.Context, name string, objInfo rest.UpdatedObje
 var _ = rest.GracefulDeleter(&REST{})
 
 // Delete deletes a Project specified by its name
-func (s *REST) Delete(ctx context.Context, name string, objectFunc rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
-	return &metav1.Status{Status: metav1.StatusSuccess}, false, s.client.Delete(name, nil)
+func (s *REST) Delete(ctx context.Context, name string, validateObjectFunc rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
+	if options == nil {
+		options = metav1.NewDeleteOptions(0)
+	}
+
+	var preconditions metav1.Preconditions
+	if options.Preconditions != nil {
+		preconditions.UID = options.Preconditions.UID
+		preconditions.ResourceVersion = options.Preconditions.ResourceVersion
+	}
+
+	// Make sure we get the right resource version
+	cur, err := s.client.Get(name, metav1.GetOptions{ResourceVersion: *preconditions.ResourceVersion})
+	if err != nil {
+		return nil, false, err
+	}
+
+	// The the provided UID does not match, return conflict
+	if cur.UID != *preconditions.UID {
+		return &metav1.Status{Status: metav1.StatusFailure, Reason: metav1.StatusReasonConflict, Message: "UID does not match"}, true, nil
+	}
+
+	if err := validateObjectFunc(ctx, cur); err != nil {
+		return nil, false, err
+	}
+
+	// Compare precondition resource version and the actual object resource version before delete
+	if preconditions.ResourceVersion != nil && *preconditions.ResourceVersion != cur.ResourceVersion {
+		return &metav1.Status{Status: metav1.StatusFailure, Reason: metav1.StatusReasonConflict, Message: "ResourceVersion does not match"}, true, nil
+	}
+
+	if err := s.client.Delete(name, options); err != nil {
+		return nil, false, err
+	}
+
+	return &metav1.Status{Status: metav1.StatusSuccess}, false, nil
 }
