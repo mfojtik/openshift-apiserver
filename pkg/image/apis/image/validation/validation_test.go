@@ -606,7 +606,8 @@ func TestValidateImageStream(t *testing.T) {
 	}
 }
 
-func TestValidateImageStreamWithWhitelister(t *testing.T) {
+// TODO: disabled per devexp team request
+func disabledTestValidateImageStreamWithWhitelister(t *testing.T) {
 	for name, test := range map[string]struct {
 		namespace             string
 		name                  string
